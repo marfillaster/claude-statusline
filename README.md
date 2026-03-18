@@ -57,14 +57,14 @@ The percentage shown is **remaining**, not used — consistent with the quota li
 
 ## Quota display
 
-Quota is fetched from the interactive `/usage` command and cached locally. The cache refreshes every 30 minutes by default. A `(stale Nh)` indicator appears if the cache is older than 2 hours.
+Quota is fetched from the interactive `/usage` command and cached locally. The cache refreshes every 5 minutes by default. A `(stale Nh)` indicator appears if the cache is older than 2 hours.
 
 To force a refresh:
 ```bash
 bash ~/.claude/update_usage.sh
 ```
 
-`USAGE_STALE_SECONDS` controls the throttle. If unset, quota is fetched on every response. The default install sets it to 1800 (30 min) in the Stop hook. To change it, edit the hook command in `~/.claude/settings.json`:
+`USAGE_STALE_SECONDS` controls the throttle. If unset, quota is fetched on every response. The default install sets it to 300 (5 min) in the Stop hook. To change it, edit the hook command in `~/.claude/settings.json`:
 ```json
 "command": "USAGE_STALE_SECONDS=900 bash $HOME/.claude/update_usage.sh &"
 ```

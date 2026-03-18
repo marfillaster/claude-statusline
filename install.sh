@@ -60,7 +60,7 @@ cfg["statusLine"] = {
 hooks = cfg.setdefault("hooks", {})
 stop_hooks = hooks.setdefault("Stop", [])
 
-our_cmd = "bash $HOME/.claude/update_usage.sh &"
+our_cmd = "USAGE_STALE_SECONDS=1800 bash $HOME/.claude/update_usage.sh &"
 our_hook = {"type": "command", "command": our_cmd}
 
 # Find or create the catch-all matcher entry

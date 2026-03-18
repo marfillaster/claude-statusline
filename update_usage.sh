@@ -8,7 +8,6 @@ set -euo pipefail
 
 CACHE_FILE="${HOME}/.claude/usage_cache.json"
 LOCK_FILE="${HOME}/.claude/usage_update.lock"
-STALE_SECONDS="${USAGE_STALE_SECONDS:-1800}"  # 30 min default
 
 SESSION="claude-usage"
 WORKSPACE="${HOME}/.claude/usage-session"
@@ -19,11 +18,11 @@ if [ "${CLAUDE_CODE_USE_VERTEX:-0}" = "1" ]; then
   exit 0
 fi
 
-# Skip if cache is fresh enough
-if [ -f "$CACHE_FILE" ]; then
+# Skip if cache is fresh enough (only when USAGE_STALE_SECONDS is explicitly set)
+if [ -n "${USAGE_STALE_SECONDS:-}" ] && [ -f "$CACHE_FILE" ]; then
   cache_ts=$(python3 -c "import json; print(int(json.load(open('$CACHE_FILE')).get('ts',0)))" 2>/dev/null || echo 0)
   cache_age=$(( $(date +%s) - cache_ts ))
-  if [ "$cache_age" -lt "$STALE_SECONDS" ]; then
+  if [ "$cache_age" -lt "$USAGE_STALE_SECONDS" ]; then
     exit 0
   fi
 fi

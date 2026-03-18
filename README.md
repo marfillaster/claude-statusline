@@ -70,9 +70,9 @@ export USAGE_STALE_SECONDS=900  # 15 minutes
 export USAGE_STALE_SECONDS=0    # update after every prompt
 ```
 
-> **Note:** Setting `USAGE_STALE_SECONDS=0` updates quota after every prompt, but each update spawns a headless `claude` session (~5–20s). To apply permanently, set the variable in the Stop hook inside `~/.claude/settings.json`:
+> **Note:** To apply `USAGE_STALE_SECONDS=0` permanently, set it in the Stop hook inside `~/.claude/settings.json` (shell profile env vars don't carry into hooks):
 > ```json
-> "command": "USAGE_STALE_SECONDS=0 bash ~/.claude/update_usage.sh &"
+> "command": "USAGE_STALE_SECONDS=0 bash $HOME/.claude/update_usage.sh &"
 > ```
 
 ## Uninstall

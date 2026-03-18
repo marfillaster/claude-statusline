@@ -64,16 +64,10 @@ To force a refresh:
 bash ~/.claude/update_usage.sh
 ```
 
-To change the refresh interval:
-```bash
-export USAGE_STALE_SECONDS=900  # 15 minutes
-export USAGE_STALE_SECONDS=0    # update after every prompt
+To change the refresh interval, set `USAGE_STALE_SECONDS` in the Stop hook inside `~/.claude/settings.json`:
+```json
+"command": "USAGE_STALE_SECONDS=900 bash $HOME/.claude/update_usage.sh &"
 ```
-
-> **Note:** To apply `USAGE_STALE_SECONDS=0` permanently, set it in the Stop hook inside `~/.claude/settings.json` (shell profile env vars don't carry into hooks):
-> ```json
-> "command": "USAGE_STALE_SECONDS=0 bash $HOME/.claude/update_usage.sh &"
-> ```
 
 ## Uninstall
 

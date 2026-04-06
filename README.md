@@ -41,7 +41,11 @@ The installer copies `statusline.sh` and `update_usage.sh` to `~/.claude/` and p
 
 **Line 1** is rendered by `statusline.sh` on every response. Claude Code passes a JSON payload via stdin with context window stats and model info.
 
-**Line 2** reads from `~/.claude/usage_cache.json`, which is populated by `update_usage.sh`. That script runs in the background after each response (via a Stop hook), at most once every 5 minutes by default. It connects to a persistent `tmux` session named `claude-usage`, sends `/usage`, captures the TUI output, and writes the cache.
+**Line 2** reads from `~/.claude/usage_cache.json`, which is populated by `update_usage.sh`. That script runs in the background:
+- **On session start** (via SessionStart hook) — immediate update when Claude launches
+- **After each response** (via Stop hook) — throttled to once every 5 minutes by default
+
+It connects to a persistent `tmux` session named `claude-usage`, sends `/usage`, captures the TUI output, and writes the cache.
 
 The `claude-usage` session starts on first use and stays warm — no per-prompt startup cost. It runs in a blank workspace (`~/.claude/usage-session/`) using your main Claude config. A lock file prevents recursive hook invocation.
 

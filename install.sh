@@ -58,6 +58,20 @@ for entry in stop_hooks:
 else:
     stop_hooks.append({"matcher": "", "hooks": [our_hook]})
 
+# hooks.SessionStart — update usage immediately on console start
+session_hooks = hooks.setdefault("SessionStart", [])
+session_cmd = "USAGE_STALE_SECONDS=0 bash $HOME/.claude/update_usage.sh &"
+session_hook = {"type": "command", "command": session_cmd}
+
+for entry in session_hooks:
+    if entry.get("matcher") == "":
+        existing = entry.setdefault("hooks", [])
+        if not any(h.get("command") == session_cmd for h in existing):
+            existing.append(session_hook)
+        break
+else:
+    session_hooks.append({"matcher": "", "hooks": [session_hook]})
+
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
     f.write("\n")
@@ -70,6 +84,6 @@ echo "Done. Restart Claude Code to activate the statusline."
 echo ""
 echo "Notes:"
 echo "  • Line 2 (quota) only appears for personal/Max plan (not Vertex/work accounts)"
-echo "  • Quota cache updates every 30 min in the background via a persistent tmux session"
-echo "  • The tmux session (claude-usage) starts on first prompt and stays warm"
+echo "  • Quota updates on session start + after each response (throttled to 5 min)"
+echo "  • The tmux session (claude-usage) starts on first update and stays warm"
 echo "  • Requires: jq, python3, tmux"

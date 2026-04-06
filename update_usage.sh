@@ -48,9 +48,11 @@ ensure_session() {
     tmux kill-session -t "$SESSION" 2>/dev/null || true
   fi
 
-  # Start a new session in the blank workspace with isolated config
+  # Start a new session (lock file prevents recursive hooks)
+  # Pass through CLAUDE_CODE_USE_VERTEX (defaults to 0 if unset)
+  local vertex_val="${CLAUDE_CODE_USE_VERTEX:-0}"
   tmux new-session -d -s "$SESSION" -x 220 -y 50 -c "$WORKSPACE"
-  tmux send-keys -t "$SESSION" "CLAUDE_CONFIG_DIR=$CONFIG_DIR claude" Enter
+  tmux send-keys -t "$SESSION" "CLAUDE_CODE_USE_VERTEX=$vertex_val claude" Enter
 
   # Wait up to 30s for the prompt
   for i in $(seq 1 30); do
@@ -77,7 +79,7 @@ RAW=""
 for i in $(seq 1 20); do
   sleep 0.5
   RAW=$(tmux capture-pane -t "$SESSION" -p -S -200 2>/dev/null || echo "")
-  if echo "$RAW" | grep -q '[0-9]\+%.*used'; then
+  if echo "$RAW" | grep -qE '[0-9]+%.*used|Current session'; then
     break
   fi
 done
@@ -86,7 +88,7 @@ done
 tmux send-keys -t "$SESSION" Escape
 sleep 0.2
 
-if [ -z "$RAW" ] || ! echo "$RAW" | grep -q '[0-9]\+%.*used'; then
+if [ -z "$RAW" ] || ! echo "$RAW" | grep -qE '[0-9]+%.*used|Current session'; then
   exit 0
 fi
 
@@ -116,13 +118,14 @@ text_clean = re.sub(r'\s+', ' ', text_clean).strip()
 result = {}
 
 # ── Percentages ──────────────────────────────────────────────────────────────
-m = re.search(r'Current session.*?(\d+)%\s*used', text_clean)
+# Support both /usage format and /status format (v2.1.92+)
+m = re.search(r'Current session[^%]*?(\d+)%\s*used', text_clean, re.DOTALL)
 if m: result['session'] = {'pct_used': int(m.group(1))}
 
-m = re.search(r'Current week.*?(\d+)%\s*used', text_clean)
+m = re.search(r'Current week[^%]*?(\d+)%\s*used', text_clean, re.DOTALL)
 if m: result['week'] = {'pct_used': int(m.group(1))}
 
-m = re.search(r'Extra usage.*?(\d+)%\s*used', text_clean)
+m = re.search(r'Extra usage[^%]*?(\d+)%\s*used', text_clean, re.DOTALL)
 if m: result['extra'] = {'pct_used': int(m.group(1))}
 
 m = re.search(r'\$([0-9.]+)\s*/\s*\$([0-9.]+)\s*spent', text_clean)

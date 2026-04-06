@@ -35,13 +35,15 @@ Restart Claude Code. That's it.
 
 The installer copies `statusline.sh` and `update_usage.sh` to `~/.claude/` and patches `~/.claude/settings.json` without overwriting your existing settings.
 
+**Note for v2.1.92+:** The update script now uses your main Claude config (not an isolated config) to ensure proper authentication. The lock file prevents recursive hook execution.
+
 ## How it works
 
 **Line 1** is rendered by `statusline.sh` on every response. Claude Code passes a JSON payload via stdin with context window stats and model info.
 
-**Line 2** reads from `~/.claude/usage_cache.json`, which is populated by `update_usage.sh`. That script runs in the background after each response (via a Stop hook), at most once every 30 minutes. It connects to a persistent `tmux` session named `claude-usage`, sends `/usage`, captures the TUI output, and writes the cache.
+**Line 2** reads from `~/.claude/usage_cache.json`, which is populated by `update_usage.sh`. That script runs in the background after each response (via a Stop hook), at most once every 5 minutes by default. It connects to a persistent `tmux` session named `claude-usage`, sends `/usage`, captures the TUI output, and writes the cache.
 
-The `claude-usage` session starts on first use and stays warm — no per-prompt startup cost. It runs in a blank workspace (`~/.claude/usage-session/`) with an isolated config (`~/.claude/usage-config/settings.json`) that disables the statusline and hooks, preventing recursive invocation.
+The `claude-usage` session starts on first use and stays warm — no per-prompt startup cost. It runs in a blank workspace (`~/.claude/usage-session/`) using your main Claude config. A lock file prevents recursive hook invocation.
 
 Line 2 is suppressed automatically when `CLAUDE_CODE_USE_VERTEX=1` is set (work/enterprise accounts don't have the same quota model).
 

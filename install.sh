@@ -13,26 +13,11 @@ cp "$SCRIPT_DIR/update_usage.sh"  "$CLAUDE_DIR/update_usage.sh"
 chmod +x "$CLAUDE_DIR/statusline.sh" "$CLAUDE_DIR/update_usage.sh"
 echo "✓ Scripts installed to $CLAUDE_DIR"
 
-# ── Create tmux session workspace and isolated config ───────────────────────
+# ── Create tmux session workspace ──────────────────────────────────────────
 WORKSPACE="${CLAUDE_DIR}/usage-session"
-CONFIG_DIR="${CLAUDE_DIR}/usage-config"
 
-mkdir -p "$WORKSPACE" "$CONFIG_DIR"
+mkdir -p "$WORKSPACE"
 
-# Minimal settings for the claude-usage tmux session:
-# - No statusLine (avoids recursive statusline rendering)
-# - No hooks (avoids triggering another update_usage.sh)
-# CLAUDE_CONFIG_DIR replaces ~/.claude entirely, so these are the only settings
-# that apply inside the tmux session.
-cat > "${CONFIG_DIR}/settings.json" <<'EOF'
-{
-  "statusLine": {
-    "type": "disabled"
-  }
-}
-EOF
-
-echo "✓ tmux session config written to $CONFIG_DIR/settings.json"
 echo "✓ tmux session workspace created at $WORKSPACE"
 
 # ── Patch settings.json ─────────────────────────────────────────────────────

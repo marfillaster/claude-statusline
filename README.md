@@ -33,7 +33,7 @@ bash install.sh
 
 Restart Claude Code. That's it.
 
-The installer copies `statusline.sh` and `update_usage.sh` to `~/.claude/` and patches `~/.claude/settings.json` without overwriting your existing settings.
+The installer copies `statusline.sh` and `update_usage.sh` to `~/.claude/` and patches `~/.claude/settings.json` without overwriting your existing settings. Safe to run multiple times (idempotent).
 
 **Note for v2.1.92+:** The update script now uses your main Claude config (not an isolated config) to ensure proper authentication. The lock file prevents recursive hook execution.
 
@@ -77,15 +77,9 @@ bash ~/.claude/update_usage.sh
 
 ## Uninstall
 
-Remove the scripts and revert settings:
-
 ```bash
-tmux kill-session -t claude-usage 2>/dev/null || true
-rm -rf ~/.claude/statusline.sh ~/.claude/update_usage.sh \
-       ~/.claude/usage_cache.json \
-       ~/.claude/usage-session ~/.claude/usage-config
-
-# In ~/.claude/settings.json, remove:
-#   "statusLine": { ... }
-#   "hooks" > "Stop" entry for update_usage.sh
+cd claude-statusline
+bash uninstall.sh
 ```
+
+The uninstaller removes all scripts, kills the tmux session, and reverts `~/.claude/settings.json`. Safe to run multiple times.

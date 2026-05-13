@@ -4,19 +4,20 @@
 set -euo pipefail
 
 CLAUDE_DIR="${HOME}/.claude"
-SESSION="claude-usage"
 
-# ── Kill tmux session ───────────────────────────────────────────────────────
-if tmux has-session -t "$SESSION" 2>/dev/null; then
-  tmux kill-session -t "$SESSION"
-  echo "✓ Killed tmux session: $SESSION"
-else
-  echo "✓ tmux session not found (already clean)"
+# ── Kill any legacy tmux sessions from older versions ──────────────────────
+if command -v tmux >/dev/null 2>&1; then
+  for suffix in personal vertex; do
+    SESSION="claude-usage-${suffix}"
+    tmux has-session -t "$SESSION" 2>/dev/null && tmux kill-session -t "$SESSION" 2>/dev/null || true
+  done
 fi
 
-# ── Remove scripts and cache ────────────────────────────────────────────────
+# ── Remove scripts and cache (both personal and vertex) ─────────────────────
 removed=()
-for file in statusline.sh update_usage.sh usage_cache.json usage_update.lock; do
+for file in statusline.sh update_usage.sh \
+            usage_cache.personal.json usage_cache.vertex.json \
+            usage_update.personal.lock usage_update.vertex.lock; do
   if [ -f "$CLAUDE_DIR/$file" ]; then
     rm -f "$CLAUDE_DIR/$file"
     removed+=("$file")
@@ -29,9 +30,9 @@ else
   echo "✓ Scripts already removed (already clean)"
 fi
 
-# ── Remove directories ──────────────────────────────────────────────────────
+# ── Remove directories (both personal and vertex) ──────────────────────────
 removed_dirs=()
-for dir in usage-session usage-config; do
+for dir in usage-session-personal usage-session-vertex usage-config; do
   if [ -d "$CLAUDE_DIR/$dir" ]; then
     rm -rf "$CLAUDE_DIR/$dir"
     removed_dirs+=("$dir")
@@ -62,8 +63,12 @@ with open(path) as f:
 
 changed = False
 
-# Remove statusLine if it matches our config
-if cfg.get("statusLine", {}).get("command") == "bash ~/.claude/statusline.sh":
+# Remove statusLine if it matches our config (handle both old and new format)
+sl_cmd = cfg.get("statusLine", {}).get("command", "")
+if sl_cmd in [
+    "bash ~/.claude/statusline.sh",
+    "CLAUDE_CODE_USE_VERTEX=${CLAUDE_CODE_USE_VERTEX:-1} bash ~/.claude/statusline.sh"
+]:
     del cfg["statusLine"]
     changed = True
 

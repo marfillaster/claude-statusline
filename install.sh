@@ -13,13 +13,6 @@ cp "$SCRIPT_DIR/update_usage.sh"  "$CLAUDE_DIR/update_usage.sh"
 chmod +x "$CLAUDE_DIR/statusline.sh" "$CLAUDE_DIR/update_usage.sh"
 echo "✓ Scripts installed to $CLAUDE_DIR"
 
-# ── Create tmux session workspace ──────────────────────────────────────────
-WORKSPACE="${CLAUDE_DIR}/usage-session"
-
-mkdir -p "$WORKSPACE"
-
-echo "✓ tmux session workspace created at $WORKSPACE"
-
 # ── Patch settings.json ─────────────────────────────────────────────────────
 SETTINGS="$CLAUDE_DIR/settings.json"
 
@@ -38,14 +31,14 @@ else:
 # statusLine
 cfg["statusLine"] = {
     "type": "command",
-    "command": "bash ~/.claude/statusline.sh"
+    "command": "CLAUDE_CODE_USE_VERTEX=${CLAUDE_CODE_USE_VERTEX:-1} bash ~/.claude/statusline.sh"
 }
 
 # hooks.Stop — add our hook, preserve any existing Stop hooks
 hooks = cfg.setdefault("hooks", {})
 stop_hooks = hooks.setdefault("Stop", [])
 
-our_cmd = "USAGE_STALE_SECONDS=300 bash $HOME/.claude/update_usage.sh &"
+our_cmd = "CLAUDE_CODE_USE_VERTEX=${CLAUDE_CODE_USE_VERTEX:-1} USAGE_STALE_SECONDS=300 bash $HOME/.claude/update_usage.sh &"
 our_hook = {"type": "command", "command": our_cmd}
 
 # Find or create the catch-all matcher entry
@@ -60,7 +53,7 @@ else:
 
 # hooks.SessionStart — update usage immediately on console start
 session_hooks = hooks.setdefault("SessionStart", [])
-session_cmd = "USAGE_STALE_SECONDS=0 bash $HOME/.claude/update_usage.sh &"
+session_cmd = "CLAUDE_CODE_USE_VERTEX=${CLAUDE_CODE_USE_VERTEX:-1} USAGE_STALE_SECONDS=0 bash $HOME/.claude/update_usage.sh &"
 session_hook = {"type": "command", "command": session_cmd}
 
 for entry in session_hooks:
@@ -85,5 +78,6 @@ echo ""
 echo "Notes:"
 echo "  • Line 2 (quota) only appears for personal/Max plan (not Vertex/work accounts)"
 echo "  • Quota updates on session start + after each response (throttled to 5 min)"
-echo "  • The tmux session (claude-usage) starts on first update and stays warm"
-echo "  • Requires: jq, python3, tmux"
+echo "  • Quota is fetched via a 1-token Haiku API call; reads rate-limit headers"
+echo "  • Multi-instance support: separate resources per auth type (personal/vertex)"
+echo "  • Requires: jq, python3, curl"

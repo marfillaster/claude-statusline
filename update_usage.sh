@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
 # ~/.claude/update_usage.sh
-# Fetches /usage via a persistent tmux+claude session and caches the result.
-# Uses a lock file to prevent concurrent runs.
+# Fetches Claude Code rate-limit utilization via the Anthropic API and caches
+# the result. Inspired by https://github.com/HermannBjorgvin/Clawdmeter.
+#
+# Method: make a minimal /v1/messages call (1 Haiku token) using the OAuth
+# token from Claude Code's credentials store, then parse rate-limit response
+# headers:
+#   anthropic-ratelimit-unified-5h-utilization  -> session pct (0.0-1.0)
+#   anthropic-ratelimit-unified-5h-reset        -> session reset (unix ts)
+#   anthropic-ratelimit-unified-7d-utilization  -> week pct (0.0-1.0)
+#   anthropic-ratelimit-unified-7d-reset        -> week reset (unix ts)
+#
 # Only runs for personal/Max plan account (CLAUDE_CODE_USE_VERTEX != 1).
 
 set -euo pipefail
 
-CACHE_FILE="${HOME}/.claude/usage_cache.json"
-LOCK_FILE="${HOME}/.claude/usage_update.lock"
+# Namespace resources by auth type
+AUTH_SUFFIX="personal"
+[ "${CLAUDE_CODE_USE_VERTEX:-0}" = "1" ] && AUTH_SUFFIX="vertex"
 
-SESSION="claude-usage"
-WORKSPACE="${HOME}/.claude/usage-session"
-CONFIG_DIR="${HOME}/.claude/usage-config"
+CACHE_FILE="${HOME}/.claude/usage_cache.${AUTH_SUFFIX}.json"
+LOCK_FILE="${HOME}/.claude/usage_update.${AUTH_SUFFIX}.lock"
 
 # Skip on work/Vertex account
 if [ "${CLAUDE_CODE_USE_VERTEX:-0}" = "1" ]; then
@@ -37,146 +46,87 @@ fi
 echo $$ > "$LOCK_FILE"
 trap 'rm -f "$LOCK_FILE"' EXIT
 
-# ── Ensure tmux session is running with claude ──────────────────────────────
-ensure_session() {
-  if tmux has-session -t "$SESSION" 2>/dev/null; then
-    # Verify claude is still at a prompt
-    if tmux capture-pane -t "$SESSION" -p 2>/dev/null | grep -q '❯'; then
-      return 0
-    fi
-    # Session exists but not at a prompt — kill and restart
-    tmux kill-session -t "$SESSION" 2>/dev/null || true
+# ── Read OAuth access token ─────────────────────────────────────────────────
+# macOS: Keychain. Linux: ~/.claude/.credentials.json.
+read_token() {
+  local creds=""
+  if [ "$(uname)" = "Darwin" ]; then
+    creds=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
   fi
-
-  # Start a new session (lock file prevents recursive hooks)
-  # Pass through CLAUDE_CODE_USE_VERTEX (defaults to 0 if unset)
-  local vertex_val="${CLAUDE_CODE_USE_VERTEX:-0}"
-  tmux new-session -d -s "$SESSION" -x 220 -y 50 -c "$WORKSPACE"
-  tmux send-keys -t "$SESSION" "CLAUDE_CODE_USE_VERTEX=$vertex_val claude" Enter
-
-  # Wait up to 30s for the prompt
-  for i in $(seq 1 30); do
-    sleep 1
-    if tmux capture-pane -t "$SESSION" -p 2>/dev/null | grep -q '❯'; then
-      return 0
-    fi
-  done
-  return 1
+  if [ -z "$creds" ] && [ -f "$HOME/.claude/.credentials.json" ]; then
+    creds=$(cat "$HOME/.claude/.credentials.json")
+  fi
+  [ -z "$creds" ] && return 1
+  printf '%s' "$creds" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    tok = d.get("claudeAiOauth", {}).get("accessToken") or d.get("accessToken")
+    if tok: print(tok)
+except Exception:
+    pass
+'
 }
 
-if ! ensure_session; then
-  exit 0
-fi
+TOKEN=$(read_token)
+[ -z "$TOKEN" ] && exit 0
 
-# ── Fetch /usage output ─────────────────────────────────────────────────────
-# Clear pane history so capture only sees fresh output
-tmux clear-history -t "$SESSION" 2>/dev/null || true
+# ── Fetch rate-limit headers ────────────────────────────────────────────────
+HDR_FILE=$(mktemp /tmp/claude_usage_hdr_XXXXX)
+trap 'rm -f "$LOCK_FILE" "$HDR_FILE"' EXIT
 
-tmux send-keys -t "$SESSION" "/usage" Enter
+curl -sS -D "$HDR_FILE" -o /dev/null \
+  "https://api.anthropic.com/v1/messages" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "anthropic-beta: oauth-2025-04-20" \
+  -H "Content-Type: application/json" \
+  -H "User-Agent: claude-code/2.1.140" \
+  -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
+  >/dev/null 2>&1 || exit 0
 
-# Poll up to 10s for the usage data to render
-RAW=""
-for i in $(seq 1 20); do
-  sleep 0.5
-  RAW=$(tmux capture-pane -t "$SESSION" -p -S -200 2>/dev/null || echo "")
-  if echo "$RAW" | grep -qE '[0-9]+%.*used|Current session'; then
-    break
-  fi
-done
+# ── Parse headers and write cache ───────────────────────────────────────────
+CACHE_FILE="$CACHE_FILE" python3 - "$HDR_FILE" <<'PYEOF'
+import json, os, re, sys, time
 
-# Dismiss the usage overlay (Escape returns to prompt without quitting)
-tmux send-keys -t "$SESSION" Escape
-sleep 0.2
+hdrs = {}
+with open(sys.argv[1]) as f:
+    for line in f:
+        if ':' in line:
+            k, _, v = line.partition(':')
+            hdrs[k.strip().lower()] = v.strip()
 
-if [ -z "$RAW" ] || ! echo "$RAW" | grep -qE '[0-9]+%.*used|Current session'; then
-  exit 0
-fi
+def fnum(name):
+    v = hdrs.get(name)
+    if v is None: return None
+    try: return float(v)
+    except ValueError: return None
 
-# Write RAW to a temp file to avoid env-var size limits
-RAW_FILE=$(mktemp /tmp/claude_usage_XXXXX)
-printf '%s' "$RAW" > "$RAW_FILE"
-trap 'rm -f "$LOCK_FILE" "$RAW_FILE"' EXIT
-
-python3 - "$RAW_FILE" <<'PYEOF'
-import re, json, os, sys, time
-from datetime import datetime, timezone, timedelta
-
-raw_text = open(sys.argv[1]).read() if len(sys.argv) > 1 else ''
-
-# Use local system timezone
-LOCAL_TZ = datetime.now(timezone.utc).astimezone().tzinfo
-
-def strip_ansi(s):
-    return re.sub(r'\x1b(?:\[[0-9;?><]*[A-Za-z]|]0;[^\x07]*\x07)', '', s)
-
-text_clean = strip_ansi(raw_text)
-text_clean = re.sub(r'[^\x20-\x7e\n]', ' ', text_clean)
-text_clean = re.sub(r'\s+', ' ', text_clean)
-text_clean = re.sub(r'[█▏▎▍▌▋▊▉▐▖▗▘▙▚▛▜▝▞▟▁▂▃▄▅▆▇]+', ' ', text_clean)
-text_clean = re.sub(r'\s+', ' ', text_clean).strip()
+def inum(name):
+    v = fnum(name)
+    return int(v) if v is not None else None
 
 result = {}
 
-# ── Percentages ──────────────────────────────────────────────────────────────
-# Support both /usage format and /status format (v2.1.92+)
-m = re.search(r'Current session[^%]*?(\d+)%\s*used', text_clean, re.DOTALL)
-if m: result['session'] = {'pct_used': int(m.group(1))}
+u5 = fnum('anthropic-ratelimit-unified-5h-utilization')
+r5 = inum('anthropic-ratelimit-unified-5h-reset')
+if u5 is not None:
+    result['session'] = {'pct_used': round(u5 * 100)}
+    if r5 is not None:
+        result['session']['reset_ts'] = r5
 
-m = re.search(r'Current week[^%]*?(\d+)%\s*used', text_clean, re.DOTALL)
-if m: result['week'] = {'pct_used': int(m.group(1))}
+u7 = fnum('anthropic-ratelimit-unified-7d-utilization')
+r7 = inum('anthropic-ratelimit-unified-7d-reset')
+if u7 is not None:
+    result['week'] = {'pct_used': round(u7 * 100)}
+    if r7 is not None:
+        result['week']['reset_ts'] = r7
 
-m = re.search(r'Extra usage[^%]*?(\d+)%\s*used', text_clean, re.DOTALL)
-if m: result['extra'] = {'pct_used': int(m.group(1))}
-
-m = re.search(r'\$([0-9.]+)\s*/\s*\$([0-9.]+)\s*spent', text_clean)
-if m:
-    result.setdefault('extra', {})['spent'] = float(m.group(1))
-    result.setdefault('extra', {})['budget'] = float(m.group(2))
-
-# ── Reset timestamps (using local timezone) ──────────────────────────────────
-now = datetime.now(LOCAL_TZ)
-months = {'Jan':1,'Feb':2,'Mar':3,'Apr':4,'May':5,'Jun':6,
-          'Jul':7,'Aug':8,'Sep':9,'Oct':10,'Nov':11,'Dec':12}
-
-# Session reset: "Resets at 6am (Timezone/Name)"
-# Raw text may have cursor-forward ANSI codes between chars
-sess_raw = re.split(r'Current week', raw_text)[0] if 'Current week' in raw_text else raw_text[:300]
-m = re.search(r'(\d+)(?:\x1b\[\d*C)?([ap])?(?:\x1b\[\d*C)?m\s*\([^)]+\)', sess_raw)
-if m:
-    hour = int(m.group(1))
-    meridiem = (m.group(2) or 'a') + 'm'
-    if meridiem == 'pm' and hour != 12: hour += 12
-    elif meridiem == 'am' and hour == 12: hour = 0
-    reset_dt = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-    if reset_dt <= now: reset_dt += timedelta(days=1)
-    result.setdefault('session', {})['reset_ts'] = int(reset_dt.timestamp())
-
-# Week reset: "Resets Mar 21 at 11am"
-m = re.search(r'Resets?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s+at\s+(\d+)(am|pm)', text_clean)
-if m:
-    mon, day, hour = months[m.group(1)], int(m.group(2)), int(m.group(3))
-    if m.group(4) == 'pm' and hour != 12: hour += 12
-    elif m.group(4) == 'am' and hour == 12: hour = 0
-    yr = now.year
-    reset_dt = datetime(yr, mon, day, hour, 0, 0, tzinfo=LOCAL_TZ)
-    if reset_dt <= now: reset_dt = datetime(yr+1, mon, day, hour, 0, 0, tzinfo=LOCAL_TZ)
-    result.setdefault('week', {})['reset_ts'] = int(reset_dt.timestamp())
-
-# Extra reset: "Resets Apr 1"
-extra_chunk = re.split(r'Extra usage', text_clean)[-1] if 'Extra usage' in text_clean else text_clean[-300:]
-m = re.search(r'[Rr]esets?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)', extra_chunk)
-if m:
-    mon, day = months[m.group(1)], int(m.group(2))
-    yr = now.year
-    reset_dt = datetime(yr, mon, day, 0, 0, 0, tzinfo=LOCAL_TZ)
-    if reset_dt <= now: reset_dt = datetime(yr+1, mon, day, 0, 0, 0, tzinfo=LOCAL_TZ)
-    result.setdefault('extra', {})['reset_ts'] = int(reset_dt.timestamp())
-
-if result:
-    result['ts'] = int(time.time())
-    cache_path = os.path.expanduser('~/.claude/usage_cache.json')
-    with open(cache_path, 'w') as f:
-        json.dump(result, f)
-else:
+if not result:
     sys.exit(1)
+
+result['ts'] = int(time.time())
+cache_path = os.path.expanduser(os.environ.get('CACHE_FILE', '~/.claude/usage_cache.personal.json'))
+with open(cache_path, 'w') as f:
+    json.dump(result, f)
 PYEOF

@@ -90,18 +90,21 @@ line1="${BOLD}${WHITE}${dir_name}${R}${sep}${ctx_part}${sep}${CYAN}${model_short
 # ── Line 2 (personal/Max plan only) ────────────────────────────────────────
 line2=""
 if [ "${CLAUDE_CODE_USE_VERTEX:-0}" != "1" ]; then
-  CACHE="${HOME}/.claude/usage_cache.json"
-  if [ -f "$CACHE" ] && command -v python3 >/dev/null 2>&1; then
-    line2=$(python3 << 'PYEOF'
-import json, os, time
+  # Namespace cache by auth type
+  AUTH_SUFFIX="personal"
+  [ "${CLAUDE_CODE_USE_VERTEX:-0}" = "1" ] && AUTH_SUFFIX="vertex"
+  CACHE="${HOME}/.claude/usage_cache.${AUTH_SUFFIX}.json"
 
-CACHE = os.path.expanduser("~/.claude/usage_cache.json")
+  if [ -f "$CACHE" ] && command -v python3 >/dev/null 2>&1; then
+    line2=$(python3 - "$CACHE" << 'PYEOF'
+import json, os, time, sys
+
+CACHE = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/.claude/usage_cache.personal.json")
 R     = "\033[0m"
 DIM   = "\033[2m"
 GREEN = "\033[32m"
 YELLOW= "\033[33m"
 RED   = "\033[31m"
-WHITE = "\033[97m"
 
 def color_rem(pct_used, val):
     rem = 100 - pct_used
@@ -126,7 +129,6 @@ try:
 
     sess = d.get("session", {})
     week = d.get("week", {})
-    extra = d.get("extra", {})
 
     if sess.get("pct_used") is not None:
         rem = 100 - sess["pct_used"]
@@ -140,13 +142,6 @@ try:
         s = color_rem(week["pct_used"], f"wk {rem}%")
         if week.get("reset_ts"):
             s += f" {DIM}↻{countdown(week['reset_ts'])}{R}"
-        parts.append(s)
-
-    if extra.get("spent") is not None and extra.get("budget") is not None:
-        left = extra["budget"] - extra["spent"]
-        s = f"{WHITE}+${left:.2f}{R}"
-        if extra.get("reset_ts"):
-            s += f" {DIM}↻{countdown(extra['reset_ts'])}{R}"
         parts.append(s)
 
     age = int(time.time()) - int(d.get("ts", 0))

@@ -4,11 +4,11 @@ A two-line status bar for [Claude Code](https://claude.ai/code) showing context 
 
 ```
 myproject │ 72% · 57k/200k │ sonnet-4-6
-sess 91% ↻3h · wk 13% ↻4d2h · +$14.46 ↻12d
+sess 91% ↻3h · wk 13% ↻4d2h
 ```
 
 **Line 1** — always visible: working directory, context remaining, model
-**Line 2** — personal/Max plan only: session, weekly, and extra quota remaining with reset countdowns
+**Line 2** — personal/Max plan only: 5-hour session and 7-day weekly quota remaining with reset countdowns
 
 Colors go green → yellow → red as the resource depletes.
 
@@ -17,10 +17,10 @@ Colors go green → yellow → red as the resource depletes.
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - `jq` — JSON parsing
 - `python3` — quota display and token math
-- `tmux` — persistent background session for quota fetching (personal plan only)
+- `curl` — fetching rate-limit headers from the Anthropic API
 
 ```bash
-brew install jq tmux   # macOS
+brew install jq   # macOS (curl + python3 are preinstalled)
 ```
 
 ## Install
@@ -35,19 +35,19 @@ Restart Claude Code. That's it.
 
 The installer copies `statusline.sh` and `update_usage.sh` to `~/.claude/` and patches `~/.claude/settings.json` without overwriting your existing settings. Safe to run multiple times (idempotent).
 
-**Note for v2.1.92+:** The update script now uses your main Claude config (not an isolated config) to ensure proper authentication. The lock file prevents recursive hook execution.
+**Multi-instance support:** If you run multiple Claude instances with different auth types (e.g., `claude` for work and `claude-ken` for personal), the scripts automatically namespace cache files and lock files by auth type. Each instance maintains its own isolated state.
 
 ## How it works
 
 **Line 1** is rendered by `statusline.sh` on every response. Claude Code passes a JSON payload via stdin with context window stats and model info.
 
-**Line 2** reads from `~/.claude/usage_cache.json`, which is populated by `update_usage.sh`. That script runs in the background:
+**Line 2** reads from `~/.claude/usage_cache.{personal|vertex}.json`, which is populated by `update_usage.sh`. That script runs in the background:
 - **On session start** (via SessionStart hook) — immediate update when Claude launches
 - **After each response** (via Stop hook) — throttled to once every 5 minutes by default
 
-It connects to a persistent `tmux` session named `claude-usage`, sends `/usage`, captures the TUI output, and writes the cache.
+`update_usage.sh` reads your Claude Code OAuth token (macOS Keychain or `~/.claude/.credentials.json` on Linux), makes a minimal `POST /v1/messages` call (1 Haiku token — effectively free), and parses the response's `anthropic-ratelimit-unified-{5h,7d}-{utilization,reset}` headers. This approach is borrowed from [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter).
 
-The `claude-usage` session starts on first use and stays warm — no per-prompt startup cost. It runs in a blank workspace (`~/.claude/usage-session/`) using your main Claude config. A lock file prevents recursive hook invocation.
+**Multi-instance isolation:** When `CLAUDE_CODE_USE_VERTEX=1` (work account), resources use the `vertex` suffix. When `CLAUDE_CODE_USE_VERTEX=0` or unset (personal account), resources use the `personal` suffix. This prevents interference when running multiple instances simultaneously.
 
 Line 2 is suppressed automatically when `CLAUDE_CODE_USE_VERTEX=1` is set (work/enterprise accounts don't have the same quota model).
 
@@ -63,7 +63,7 @@ The percentage shown is **remaining**, not used — consistent with the quota li
 
 ## Quota display
 
-Quota is fetched from the interactive `/usage` command and cached locally. The cache refreshes every 5 minutes by default. A `(stale Nh)` indicator appears if the cache is older than 2 hours.
+Quota is read from Anthropic API rate-limit response headers and cached locally. The cache refreshes every 5 minutes by default. A `(stale Nh)` indicator appears if the cache is older than 2 hours.
 
 To force a refresh:
 ```bash
@@ -82,4 +82,4 @@ cd claude-statusline
 bash uninstall.sh
 ```
 
-The uninstaller removes all scripts, kills the tmux session, and reverts `~/.claude/settings.json`. Safe to run multiple times.
+The uninstaller removes all scripts and reverts `~/.claude/settings.json`. Safe to run multiple times.
